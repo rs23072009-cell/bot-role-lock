@@ -14,8 +14,11 @@ class Store {
   }
 
   guild(guildId) {
-    this.data.guilds[guildId] ||= { lockedRoles: [], logChannelId: null, panelChannelId: null, panelMessageId: null };
-    return this.data.guilds[guildId];
+    this.data.guilds[guildId] ||= { lockedRoles: [], roleLimits: {}, logChannelId: null, panelChannelId: null, panelMessageId: null };
+    const config = this.data.guilds[guildId];
+    config.lockedRoles ||= [];
+    config.roleLimits ||= {};
+    return config;
   }
 
   save() {
@@ -33,6 +36,13 @@ class Store {
   unlock(guildId, roleId) {
     const config = this.guild(guildId);
     config.lockedRoles = config.lockedRoles.filter(id => id !== roleId);
+    this.save();
+  }
+  limit(guildId, roleId) { return this.guild(guildId).roleLimits[roleId] ?? null; }
+  setLimit(guildId, roleId, maximum) {
+    const config = this.guild(guildId);
+    if (maximum === null) delete config.roleLimits[roleId];
+    else config.roleLimits[roleId] = maximum;
     this.save();
   }
   set(guildId, values) { Object.assign(this.guild(guildId), values); this.save(); }
