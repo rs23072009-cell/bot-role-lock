@@ -1,22 +1,37 @@
 require('dotenv').config();
 const {
   ActionRowBuilder, AuditLogEvent, ChannelType, Client, EmbedBuilder, Events,
-  GatewayIntentBits, PermissionFlagsBits, RoleSelectMenuBuilder
+  GatewayIntentBits, PermissionFlagsBits, REST, RoleSelectMenuBuilder, Routes,
+  SlashCommandBuilder
 } = require('discord.js');
 const Store = require('./src/store');
 
 const token = process.env.DISCORD_TOKEN?.trim();
 if (!token) throw new Error('DISCORD_TOKEN manquant.');
-const prefix = process.env.BOT_PREFIX?.trim() || ';';
 const owners = new Set((process.env.OWNER_IDS || '949707800257384498').split(',').map(id => id.trim()).filter(Boolean));
 const store = new Store(process.env.DATA_FILE || './data/role-lock.json');
 const COLOR = 0xf59e0b;
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
-  GatewayIntentBits.GuildMembers,
-  GatewayIntentBits.GuildMessages,
-  GatewayIntentBits.MessageContent
+  GatewayIntentBits.GuildMembers
 ] });
+const commands = [
+  new SlashCommandBuilder().setName('rolelock').setDescription('Gère le verrouillage des rôles')
+    .addSubcommand(command => command.setName('setup').setDescription('Crée ou actualise le panneau de gestion')
+      .addChannelOption(option => option.setName('salon').setDescription('Salon du panneau').addChannelTypes(ChannelType.GuildText)))
+    .addSubcommand(command => command.setName('verrouiller').setDescription('Bloque toute nouvelle attribution')
+      .addRoleOption(option => option.setName('role').setDescription('Rôle à verrouiller').setRequired(true)))
+    .addSubcommand(command => command.setName('deverrouiller').setDescription('Autorise de nouveau les attributions')
+      .addRoleOption(option => option.setName('role').setDescription('Rôle à déverrouiller').setRequired(true)))
+    .addSubcommand(command => command.setName('limite').setDescription('Définit une limite de détenteurs, 0 pour retirer la limite')
+      .addRoleOption(option => option.setName('role').setDescription('Rôle concerné').setRequired(true))
+      .addIntegerOption(option => option.setName('maximum').setDescription('Maximum autorisé, 0 pour désactiver').setRequired(true).setMinValue(0).setMaxValue(100000)))
+    .addSubcommand(command => command.setName('statut').setDescription('Affiche le statut d’un rôle')
+      .addRoleOption(option => option.setName('role').setDescription('Rôle concerné').setRequired(true)))
+    .addSubcommand(command => command.setName('liste').setDescription('Affiche les rôles verrouillés et limités'))
+    .addSubcommand(command => command.setName('logs').setDescription('Configure les journaux')
+      .addChannelOption(option => option.setName('salon').setDescription('Salon des logs, vide pour désactiver').addChannelTypes(ChannelType.GuildText)))
+].map(command => command.toJSON());
 
 function allowed(member) {
   return owners.has(member.id) || member.id === member.guild.ownerId
@@ -85,85 +100,61 @@ async function unlockRole(guild, role, actor) {
   return `${role} est maintenant déverrouillé.`;
 }
 
-async function setup(message) {
-  let channel = message.mentions.channels.first();
-  if (!channel) channel = await message.guild.channels.create({
+async function setup(interaction) {
+  let channel = interaction.options.getChannel('salon');
+  if (!channel) channel = await interaction.guild.channels.create({
     name: '🔒・role-lock', type: ChannelType.GuildText,
-    reason: `Configuration Role Lock par ${message.author.tag}`
+    reason: `Configuration Role Lock par ${interaction.user.tag}`
   });
-  if (!channel.isTextBased()) return message.reply('Choisis un salon textuel.');
-  const config = store.guild(message.guild.id);
+  const config = store.guild(interaction.guild.id);
   let panelMessage = config.panelMessageId ? await channel.messages.fetch(config.panelMessageId).catch(() => null) : null;
-  panelMessage = panelMessage ? await panelMessage.edit(panelPayload(message.guild)) : await channel.send(panelPayload(message.guild));
-  store.set(message.guild.id, { panelChannelId: channel.id, panelMessageId: panelMessage.id });
-  return message.reply({ content: `Panneau configuré dans ${channel}.`, allowedMentions: { repliedUser: false } });
+  panelMessage = panelMessage ? await panelMessage.edit(panelPayload(interaction.guild)) : await channel.send(panelPayload(interaction.guild));
+  store.set(interaction.guild.id, { panelChannelId: channel.id, panelMessageId: panelMessage.id });
+  return interaction.editReply(`Panneau configuré dans ${channel}.`);
 }
 
 client.once(Events.ClientReady, async ready => {
+  await new REST({ version: '10' }).setToken(token).put(Routes.applicationCommands(ready.user.id), { body: commands });
   for (const guild of ready.guilds.cache.values()) await refreshPanel(guild).catch(() => {});
   console.log(`Role Lock connecté : ${ready.user.tag}`);
 });
 
-client.on(Events.MessageCreate, async message => {
-  if (!message.guild || message.author.bot || !message.content.startsWith(prefix)) return;
-  const input = message.content.slice(prefix.length).trim().split(/\s+/);
-  if (input.shift()?.toLowerCase() !== 'rolelock') return;
-  if (!allowed(message.member)) return message.reply({ content: 'Tu n’as pas accès à cette commande.', allowedMentions: { repliedUser: false } });
-  const action = input.shift()?.toLowerCase() || 'help';
-  try {
-    if (action === 'setup') return setup(message);
-    if (action === 'lock') return message.reply(await lockRole(message.guild, message.mentions.roles.first(), message.author));
-    if (action === 'unlock') return message.reply(await unlockRole(message.guild, message.mentions.roles.first(), message.author));
-    if (action === 'list') {
-      const roles = store.guild(message.guild.id).lockedRoles.filter(id => message.guild.roles.cache.has(id));
-      return message.reply({ embeds: [new EmbedBuilder().setColor(COLOR).setTitle('Rôles verrouillés').setDescription(roles.length ? roles.map(id => `<@&${id}>`).join('\n') : 'Aucun rôle verrouillé.')], allowedMentions: { parse: [] } });
-    }
-    if (action === 'status') {
-      const role = message.mentions.roles.first();
-      if (!role) return message.reply(`Usage : \`${prefix}rolelock status @rôle\``);
-      const limit = store.limit(message.guild.id, role.id);
-      return message.reply(`${role} est **${store.isLocked(message.guild.id, role.id) ? 'verrouillé' : 'déverrouillé'}**. Limite : **${limit ?? 'aucune'}**.`);
-    }
-    if (action === 'limit') {
-      const role = message.mentions.roles.first();
-      const value = input.find(part => !/^<@&\d+>$/.test(part));
-      const problem = roleProblem(message.guild, role);
-      if (problem) return message.reply(problem);
-      if (value?.toLowerCase() === 'off') {
-        store.setLimit(message.guild.id, role.id, null);
-        await refreshPanel(message.guild).catch(() => {});
-        await writeLog(message.guild, `${message.author} a retiré la limite de ${role}.`);
-        return message.reply(`La limite de ${role} est supprimée.`);
-      }
-      const maximum = Number.parseInt(value, 10);
-      if (!Number.isInteger(maximum) || maximum < 1 || maximum > 100000) {
-        return message.reply(`Usage : \`${prefix}rolelock limit @rôle nombre|off\`.`);
-      }
-      store.setLimit(message.guild.id, role.id, maximum);
-      await refreshPanel(message.guild).catch(() => {});
-      await writeLog(message.guild, `${message.author} a limité ${role} à ${maximum} personne(s).`);
-      return message.reply(`${role} est maintenant limité à **${maximum} personne(s)**.`);
-    }
-    if (action === 'logs') {
-      if (input[0]?.toLowerCase() === 'off') { store.set(message.guild.id, { logChannelId: null }); return message.reply('Logs désactivés.'); }
-      const channel = message.mentions.channels.first();
-      if (!channel?.isTextBased()) return message.reply(`Usage : \`${prefix}rolelock logs #salon\` ou \`${prefix}rolelock logs off\`.`);
-      store.set(message.guild.id, { logChannelId: channel.id });
-      return message.reply(`Les logs seront envoyés dans ${channel}.`);
-    }
-    return message.reply({ embeds: [new EmbedBuilder().setColor(COLOR).setTitle('Role Lock').setDescription([
-      `\`${prefix}rolelock setup [#salon]\``, `\`${prefix}rolelock lock @rôle\``, `\`${prefix}rolelock unlock @rôle\``,
-      `\`${prefix}rolelock status @rôle\``, `\`${prefix}rolelock limit @rôle nombre|off\``,
-      `\`${prefix}rolelock list\``, `\`${prefix}rolelock logs #salon|off\``
-    ].join('\n'))] });
-  } catch (error) {
-    console.error(error);
-    return message.reply('Une erreur est survenue. Vérifie les permissions et la hiérarchie du bot.').catch(() => {});
-  }
-});
-
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.inGuild() || !interaction.isRoleSelectMenu() || !interaction.customId.startsWith('rolelock:')) return;
+  if (!interaction.inGuild()) return;
+  if (interaction.isChatInputCommand() && interaction.commandName === 'rolelock') {
+    if (!allowed(interaction.member)) return interaction.reply({ content: 'Tu n’as pas accès à cette commande.', ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const action = interaction.options.getSubcommand();
+      if (action === 'setup') return setup(interaction);
+      const role = interaction.options.getRole('role');
+      if (action === 'verrouiller') return interaction.editReply(await lockRole(interaction.guild, role, interaction.user));
+      if (action === 'deverrouiller') return interaction.editReply(await unlockRole(interaction.guild, role, interaction.user));
+      if (action === 'statut') {
+        const limit = store.limit(interaction.guildId, role.id);
+        return interaction.editReply(`${role} est **${store.isLocked(interaction.guildId, role.id) ? 'verrouillé' : 'déverrouillé'}**. Limite : **${limit ?? 'aucune'}**.`);
+      }
+      if (action === 'limite') {
+        const problem = roleProblem(interaction.guild, role);
+        if (problem) return interaction.editReply(problem);
+        const maximum = interaction.options.getInteger('maximum', true);
+        store.setLimit(interaction.guildId, role.id, maximum === 0 ? null : maximum);
+        await refreshPanel(interaction.guild).catch(() => {});
+        await writeLog(interaction.guild, maximum === 0 ? `${interaction.user} a retiré la limite de ${role}.` : `${interaction.user} a limité ${role} à ${maximum} personne(s).`);
+        return interaction.editReply(maximum === 0 ? `La limite de ${role} est supprimée.` : `${role} est maintenant limité à **${maximum} personne(s)**.`);
+      }
+      if (action === 'liste') return interaction.editReply(panelPayload(interaction.guild));
+      if (action === 'logs') {
+        const channel = interaction.options.getChannel('salon');
+        store.set(interaction.guildId, { logChannelId: channel?.id || null });
+        return interaction.editReply(channel ? `Les logs seront envoyés dans ${channel}.` : 'Logs désactivés.');
+      }
+    } catch (error) {
+      console.error(error);
+      return interaction.editReply('Une erreur est survenue. Vérifie les permissions et la hiérarchie du bot.');
+    }
+  }
+  if (!interaction.isRoleSelectMenu() || !interaction.customId.startsWith('rolelock:')) return;
   if (!allowed(interaction.member)) return interaction.reply({ content: 'Tu n’as pas accès à ce panneau.', ephemeral: true });
   await interaction.deferReply({ ephemeral: true });
   const role = interaction.guild.roles.cache.get(interaction.values[0]);
