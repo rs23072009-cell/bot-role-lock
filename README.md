@@ -2,19 +2,16 @@
 
 Bot Discord qui empêche l’attribution de rôles verrouillés. Toute nouvelle attribution est retirée automatiquement et peut être envoyée dans un salon de logs.
 
-## Commandes
+## Commandes slash
 
 ```text
-;rolelock setup [#salon]
-;rolelock lock @rôle
-;rolelock unlock @rôle
-;rolelock status @rôle
-;rolelock limit @rôle 10
-;rolelock limit @rôle off
-;rolelock list
-;rolelock logs #salon
-;rolelock logs off
-;rolelock help
+/rolelock setup [salon]
+/rolelock verrouiller rôle
+/rolelock deverrouiller rôle
+/rolelock statut rôle
+/rolelock limite rôle maximum
+/rolelock liste
+/rolelock logs [salon]
 ```
 
 `setup` crée, ou utilise, un salon de gestion avec deux menus : **Verrouiller un rôle** et **Déverrouiller un rôle**.
@@ -25,7 +22,7 @@ Le verrouillage conserve les détenteurs actuels et bloque toute nouvelle attrib
 
 Le bot a besoin de **Gérer les rôles**, **Voir les logs d’audit**, **Voir les salons**, **Envoyer des messages** et **Intégrer des liens**. Son rôle doit se trouver au-dessus des rôles protégés.
 
-Active aussi les intents **Server Members Intent** et **Message Content Intent** dans le portail Discord.
+Active l’intent **Server Members Intent** dans le portail Discord. Le bot fonctionne uniquement avec des commandes slash et n’utilise pas Message Content.
 
 ## Installation Oracle
 
