@@ -1,0 +1,20 @@
+[Unit]
+Description=Discord Role Lock bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/opt/bot-role-lock
+EnvironmentFile=/etc/bot-role-lock.env
+ExecStart=/usr/bin/node /opt/bot-role-lock/index.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
