@@ -34,11 +34,13 @@ function roleProblem(guild, role) {
 
 function panelPayload(guild) {
   const locked = store.guild(guild.id).lockedRoles.filter(id => guild.roles.cache.has(id));
+  const limits = Object.entries(store.guild(guild.id).roleLimits).filter(([id]) => guild.roles.cache.has(id));
   const embed = new EmbedBuilder().setColor(COLOR).setTitle('Verrouillage des rôles')
     .setDescription([
       'Sélectionne un rôle à verrouiller ou à déverrouiller.',
       '',
-      locked.length ? `**Rôles verrouillés**\n${locked.map(id => `<@&${id}>`).join('\n')}` : '*Aucun rôle verrouillé.*'
+      locked.length ? `**Rôles verrouillés**\n${locked.map(id => `<@&${id}>`).join('\n')}` : '*Aucun rôle verrouillé.*',
+      limits.length ? `**Limites**\n${limits.map(([id, maximum]) => `<@&${id}> — ${maximum} personne(s)`).join('\n')}` : ''
     ].join('\n'));
   const lockMenu = new RoleSelectMenuBuilder().setCustomId('rolelock:lock').setPlaceholder('Verrouiller un rôle').setMinValues(1).setMaxValues(1);
   const unlockMenu = new RoleSelectMenuBuilder().setCustomId('rolelock:unlock').setPlaceholder('Déverrouiller un rôle').setMinValues(1).setMaxValues(1);
@@ -119,7 +121,28 @@ client.on(Events.MessageCreate, async message => {
     if (action === 'status') {
       const role = message.mentions.roles.first();
       if (!role) return message.reply(`Usage : \`${prefix}rolelock status @rôle\``);
-      return message.reply(`${role} est **${store.isLocked(message.guild.id, role.id) ? 'verrouillé' : 'déverrouillé'}**.`);
+      const limit = store.limit(message.guild.id, role.id);
+      return message.reply(`${role} est **${store.isLocked(message.guild.id, role.id) ? 'verrouillé' : 'déverrouillé'}**. Limite : **${limit ?? 'aucune'}**.`);
+    }
+    if (action === 'limit') {
+      const role = message.mentions.roles.first();
+      const value = input.find(part => !/^<@&\d+>$/.test(part));
+      const problem = roleProblem(message.guild, role);
+      if (problem) return message.reply(problem);
+      if (value?.toLowerCase() === 'off') {
+        store.setLimit(message.guild.id, role.id, null);
+        await refreshPanel(message.guild).catch(() => {});
+        await writeLog(message.guild, `${message.author} a retiré la limite de ${role}.`);
+        return message.reply(`La limite de ${role} est supprimée.`);
+      }
+      const maximum = Number.parseInt(value, 10);
+      if (!Number.isInteger(maximum) || maximum < 1 || maximum > 100000) {
+        return message.reply(`Usage : \`${prefix}rolelock limit @rôle nombre|off\`.`);
+      }
+      store.setLimit(message.guild.id, role.id, maximum);
+      await refreshPanel(message.guild).catch(() => {});
+      await writeLog(message.guild, `${message.author} a limité ${role} à ${maximum} personne(s).`);
+      return message.reply(`${role} est maintenant limité à **${maximum} personne(s)**.`);
     }
     if (action === 'logs') {
       if (input[0]?.toLowerCase() === 'off') { store.set(message.guild.id, { logChannelId: null }); return message.reply('Logs désactivés.'); }
@@ -130,7 +153,8 @@ client.on(Events.MessageCreate, async message => {
     }
     return message.reply({ embeds: [new EmbedBuilder().setColor(COLOR).setTitle('Role Lock').setDescription([
       `\`${prefix}rolelock setup [#salon]\``, `\`${prefix}rolelock lock @rôle\``, `\`${prefix}rolelock unlock @rôle\``,
-      `\`${prefix}rolelock status @rôle\``, `\`${prefix}rolelock list\``, `\`${prefix}rolelock logs #salon|off\``
+      `\`${prefix}rolelock status @rôle\``, `\`${prefix}rolelock limit @rôle nombre|off\``,
+      `\`${prefix}rolelock list\``, `\`${prefix}rolelock logs #salon|off\``
     ].join('\n'))] });
   } catch (error) {
     console.error(error);
@@ -151,21 +175,30 @@ client.on(Events.InteractionCreate, async interaction => {
 
 client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
   const added = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
-  const locked = added.filter(role => store.isLocked(newMember.guild.id, role.id));
-  for (const role of locked.values()) {
+  const blocked = added.filter(role => {
+    if (store.isLocked(newMember.guild.id, role.id)) return true;
+    const maximum = store.limit(newMember.guild.id, role.id);
+    return maximum !== null && role.members.size > maximum;
+  });
+  for (const role of blocked.values()) {
     if (role.position >= newMember.guild.members.me.roles.highest.position) {
       await writeLog(newMember.guild, `Impossible de retirer ${role} à ${newMember} : rôle trop haut.`);
       continue;
     }
-    await newMember.roles.remove(role, 'Role Lock : rôle verrouillé').catch(() => {});
+    const maximum = store.limit(newMember.guild.id, role.id);
+    const reason = store.isLocked(newMember.guild.id, role.id)
+      ? 'rôle verrouillé'
+      : `limite de ${maximum} atteinte`;
+    await newMember.roles.remove(role, `Role Lock : ${reason}`).catch(() => {});
     const audit = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 6 }).catch(() => null);
     const entry = audit?.entries.find(item => item.target?.id === newMember.id && Date.now() - item.createdTimestamp < 10000);
-    await writeLog(newMember.guild, `${role} a été retiré de ${newMember}.${entry?.executor ? ` Attribution tentée par ${entry.executor}.` : ''}`);
+    await writeLog(newMember.guild, `${role} a été retiré de ${newMember} : ${reason}.${entry?.executor ? ` Attribution tentée par ${entry.executor}.` : ''}`);
   }
 });
 
 client.on(Events.GuildRoleDelete, role => {
   if (store.isLocked(role.guild.id, role.id)) store.unlock(role.guild.id, role.id);
+  if (store.limit(role.guild.id, role.id) !== null) store.setLimit(role.guild.id, role.id, null);
 });
 
 client.login(token);
