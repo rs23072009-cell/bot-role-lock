@@ -1,0 +1,16 @@
+{
+  "name": "bot-role-lock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot Discord de verrouillage des rôles",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node scripts/check.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.6.1"
+  }
+}
+
