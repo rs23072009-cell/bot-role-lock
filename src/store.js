@@ -14,10 +14,11 @@ class Store {
   }
 
   guild(guildId) {
-    this.data.guilds[guildId] ||= { lockedRoles: [], roleLimits: {}, logChannelId: null, panelChannelId: null, panelMessageId: null };
+    this.data.guilds[guildId] ||= { lockedRoles: [], roleLimits: {}, immunityRoleId: null, logChannelId: null, panelChannelId: null, panelMessageId: null };
     const config = this.data.guilds[guildId];
     config.lockedRoles ||= [];
     config.roleLimits ||= {};
+    config.immunityRoleId ||= null;
     return config;
   }
 
