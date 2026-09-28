@@ -10,7 +10,7 @@ const token = process.env.DISCORD_TOKEN?.trim();
 if (!token) throw new Error('DISCORD_TOKEN manquant.');
 const owners = new Set((process.env.OWNER_IDS || '949707800257384498').split(',').map(id => id.trim()).filter(Boolean));
 const store = new Store(process.env.DATA_FILE || './data/role-lock.json');
-const COLOR = 0xf59e0b;
+const COLOR = 0xe11d48;
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMembers
@@ -47,7 +47,8 @@ function roleProblem(guild, role) {
   return null;
 }
 
-function panelPayload(guild) {
+async function panelPayload(guild) {
+  await guild.members.fetch().catch(() => null);
   const config = store.guild(guild.id);
   const locked = config.lockedRoles
     .map(id => guild.roles.cache.get(id))
@@ -139,7 +140,7 @@ async function refreshPanel(guild) {
   const channel = await guild.channels.fetch(config.panelChannelId).catch(() => null);
   const message = channel?.isTextBased() ? await channel.messages.fetch(config.panelMessageId).catch(() => null) : null;
   if (!message) return false;
-  await message.edit(panelPayload(guild));
+  await message.edit(await panelPayload(guild));
   return true;
 }
 
@@ -176,7 +177,8 @@ async function setup(interaction) {
   });
   const config = store.guild(interaction.guild.id);
   let panelMessage = config.panelMessageId ? await channel.messages.fetch(config.panelMessageId).catch(() => null) : null;
-  panelMessage = panelMessage ? await panelMessage.edit(panelPayload(interaction.guild)) : await channel.send(panelPayload(interaction.guild));
+  const payload = await panelPayload(interaction.guild);
+  panelMessage = panelMessage ? await panelMessage.edit(payload) : await channel.send(payload);
   store.set(interaction.guild.id, { panelChannelId: channel.id, panelMessageId: panelMessage.id });
   return interaction.editReply(`Panneau configuré dans ${channel}.`);
 }
@@ -211,7 +213,7 @@ client.on(Events.InteractionCreate, async interaction => {
         await writeLog(interaction.guild, maximum === 0 ? `${interaction.user} a retiré la limite de ${role}.` : `${interaction.user} a limité ${role} à ${maximum} personne(s).`);
         return interaction.editReply(maximum === 0 ? `La limite de ${role} est supprimée.` : `${role} est maintenant limité à **${maximum} personne(s)**.`);
       }
-      if (action === 'liste') return interaction.editReply(panelPayload(interaction.guild));
+      if (action === 'liste') return interaction.editReply(await panelPayload(interaction.guild));
       if (action === 'logs') {
         const channel = interaction.options.getChannel('salon');
         store.set(interaction.guildId, { logChannelId: channel?.id || null });
