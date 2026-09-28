@@ -30,7 +30,7 @@ const commands = [
       .addRoleOption(option => option.setName('role').setDescription('Rôle concerné').setRequired(true)))
     .addSubcommand(command => command.setName('liste').setDescription('Affiche les rôles verrouillés et limités'))
     .addSubcommand(command => command.setName('whitelist').setDescription('Configure le rôle whitelist autorisé à contourner Role Lock')
-      .addRoleOption(option => option.setName('role').setDescription('Rôle immunisé, vide pour désactiver')))
+      .addRoleOption(option => option.setName('role').setDescription('Rôle whitelist, vide pour désactiver')))
     .addSubcommand(command => command.setName('logs').setDescription('Configure les journaux')
       .addChannelOption(option => option.setName('salon').setDescription('Salon des logs, vide pour désactiver').addChannelTypes(ChannelType.GuildText)))
 ].map(command => command.toJSON());
@@ -92,8 +92,8 @@ async function panelPayload(guild) {
       '3. Utilise le second menu pour choisir uniquement parmi les rôles déjà verrouillés.',
       '',
       '### Rôle whitelist',
-      config.immunityRoleId && guild.roles.cache.has(config.immunityRoleId)
-        ? `> <@&${config.immunityRoleId}> est autorisé à attribuer les rôles verrouillés et dépasser les limites.`
+      config.whitelistRoleId && guild.roles.cache.has(config.whitelistRoleId)
+        ? `> <@&${config.whitelistRoleId}> est autorisé à attribuer les rôles verrouillés et dépasser les limites.`
         : '> Aucun rôle whitelist n’est configuré.',
       '',
       `### Rôles verrouillés — ${locked.length}`,
@@ -222,17 +222,17 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       if (action === 'liste') return interaction.editReply(await panelPayload(interaction.guild));
       if (action === 'whitelist') {
-        const immunityRole = interaction.options.getRole('role');
-        if (immunityRole && (immunityRole.id === interaction.guild.id || immunityRole.managed)) {
+        const whitelistRole = interaction.options.getRole('role');
+        if (whitelistRole && (whitelistRole.id === interaction.guild.id || whitelistRole.managed)) {
           return interaction.editReply('Choisis un rôle normal différent de @everyone.');
         }
-        store.set(interaction.guildId, { immunityRoleId: immunityRole?.id || null });
+        store.set(interaction.guildId, { whitelistRoleId: whitelistRole?.id || null });
         await refreshPanel(interaction.guild).catch(() => {});
-        await writeLog(interaction.guild, immunityRole
-          ? `${interaction.user} a défini ${immunityRole} comme rôle whitelist.`
+        await writeLog(interaction.guild, whitelistRole
+          ? `${interaction.user} a défini ${whitelistRole} comme rôle whitelist.`
           : `${interaction.user} a retiré le rôle whitelist Role Lock.`);
-        return interaction.editReply(immunityRole
-          ? `${immunityRole} est maintenant whitelisté et peut attribuer les rôles verrouillés sans retrait automatique.`
+        return interaction.editReply(whitelistRole
+          ? `${whitelistRole} est maintenant whitelisté et peut attribuer les rôles verrouillés sans retrait automatique.`
           : 'Le rôle whitelist a été retiré.');
       }
       if (action === 'logs') {
@@ -271,13 +271,13 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
   await new Promise(resolve => setTimeout(resolve, 700));
   const audit = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 6 }).catch(() => null);
   const entry = audit?.entries.find(item => item.target?.id === newMember.id && Date.now() - item.createdTimestamp < 10000);
-  const immunityRoleId = store.guild(newMember.guild.id).immunityRoleId;
+  const whitelistRoleId = store.guild(newMember.guild.id).whitelistRoleId;
   const executorMember = entry?.executor?.id
     ? newMember.guild.members.cache.get(entry.executor.id) || await newMember.guild.members.fetch(entry.executor.id).catch(() => null)
     : null;
 
-  if (immunityRoleId && executorMember?.roles.cache.has(immunityRoleId)) {
-    await writeLog(newMember.guild, `${entry.executor} a attribué ${blocked.map(String).join(', ')} à ${newMember} avec le rôle whitelist <@&${immunityRoleId}>.`);
+  if (whitelistRoleId && executorMember?.roles.cache.has(whitelistRoleId)) {
+    await writeLog(newMember.guild, `${entry.executor} a attribué ${blocked.map(String).join(', ')} à ${newMember} avec le rôle whitelist <@&${whitelistRoleId}>.`);
     return;
   }
 
