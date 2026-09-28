@@ -11,7 +11,7 @@ Bot Discord qui empêche l’attribution de rôles verrouillés. Toute nouvelle 
 /rolelock statut rôle
 /rolelock limite rôle maximum
 /rolelock liste
-/rolelock immunite [rôle]
+/rolelock whitelist [rôle]
 /rolelock logs [salon]
 ```
 
@@ -43,8 +43,8 @@ sudo systemctl status bot-role-lock --no-pager
 ```
 
 
-## Rôle immunisé
+## Rôle whitelist
 
-Utilise `/rolelock immunite rôle:@Protégé` pour autoriser les détenteurs de ce rôle à attribuer des rôles verrouillés et à dépasser les limites configurées. L’attribution reste enregistrée dans les logs.
+Utilise `/rolelock whitelist role:@Protégé` pour autoriser les détenteurs de ce rôle à attribuer des rôles verrouillés et à dépasser les limites configurées. L’attribution reste enregistrée dans les logs.
 
 Exécute `/rolelock immunite` sans rôle pour désactiver cette immunité. Le rôle immunisé peut être placé au-dessus du rôle du bot.
