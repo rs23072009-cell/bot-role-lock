@@ -223,9 +223,8 @@ client.on(Events.InteractionCreate, async interaction => {
       if (action === 'liste') return interaction.editReply(await panelPayload(interaction.guild));
       if (action === 'immunite') {
         const immunityRole = interaction.options.getRole('role');
-        if (immunityRole) {
-          const problem = roleProblem(interaction.guild, immunityRole);
-          if (problem) return interaction.editReply(problem);
+        if (immunityRole && (immunityRole.id === interaction.guild.id || immunityRole.managed)) {
+          return interaction.editReply('Choisis un rôle normal différent de @everyone.');
         }
         store.set(interaction.guildId, { immunityRoleId: immunityRole?.id || null });
         await refreshPanel(interaction.guild).catch(() => {});
