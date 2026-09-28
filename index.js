@@ -2,7 +2,7 @@ require('dotenv').config();
 const {
   ActionRowBuilder, AuditLogEvent, ChannelType, Client, EmbedBuilder, Events,
   GatewayIntentBits, PermissionFlagsBits, REST, RoleSelectMenuBuilder, Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder, StringSelectMenuBuilder
 } = require('discord.js');
 const Store = require('./src/store');
 
@@ -48,21 +48,89 @@ function roleProblem(guild, role) {
 }
 
 function panelPayload(guild) {
-  const locked = store.guild(guild.id).lockedRoles.filter(id => guild.roles.cache.has(id));
-  const limits = Object.entries(store.guild(guild.id).roleLimits).filter(([id]) => guild.roles.cache.has(id));
-  const embed = new EmbedBuilder().setColor(COLOR).setTitle('Verrouillage des rôles')
+  const config = store.guild(guild.id);
+  const locked = config.lockedRoles
+    .map(id => guild.roles.cache.get(id))
+    .filter(Boolean)
+    .sort((a, b) => b.position - a.position);
+  const limits = Object.entries(config.roleLimits)
+    .map(([id, maximum]) => [guild.roles.cache.get(id), maximum])
+    .filter(([role]) => role)
+    .sort(([a], [b]) => b.position - a.position);
+
+  const lockedDetails = locked.length
+    ? locked.slice(0, 20).map((role, index) => {
+        const maximum = store.limit(guild.id, role.id);
+        return [
+          `**${index + 1}. ${role.name}** — ${role}`,
+          `> Détenteurs actuels : **${role.members.size}**`,
+          `> Limite : **${maximum === null ? 'aucune' : maximum + ' membre(s)'}**`
+        ].join('\n');
+      }).join('\n\n')
+    : '> Aucun rôle n’est actuellement verrouillé.';
+
+  const limitDetails = limits.length
+    ? limits.slice(0, 20).map(([role, maximum]) =>
+        `• ${role} — **${role.members.size}/${maximum}** détenteur(s)`
+      ).join('\n')
+    : '> Aucune limite de détenteurs configurée.';
+
+  const embed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setAuthor({ name: client.user?.username || 'Tokina Role Lock', iconURL: client.user?.displayAvatarURL({ extension: 'png', size: 128 }) })
+    .setTitle('Gestion des rôles protégés')
     .setDescription([
-      'Sélectionne un rôle à verrouiller ou à déverrouiller.',
+      '## Centre de verrouillage',
+      '> Protège les rôles sensibles contre toute nouvelle attribution non autorisée.',
       '',
-      locked.length ? `**Rôles verrouillés**\n${locked.map(id => `<@&${id}>`).join('\n')}` : '*Aucun rôle verrouillé.*',
-      limits.length ? `**Limites**\n${limits.map(([id, maximum]) => `<@&${id}> — ${maximum} personne(s)`).join('\n')}` : ''
-    ].join('\n'));
-  const lockMenu = new RoleSelectMenuBuilder().setCustomId('rolelock:lock').setPlaceholder('Verrouiller un rôle').setMinValues(1).setMaxValues(1);
-  const unlockMenu = new RoleSelectMenuBuilder().setCustomId('rolelock:unlock').setPlaceholder('Déverrouiller un rôle').setMinValues(1).setMaxValues(1);
-  return { embeds: [embed], components: [
-    new ActionRowBuilder().addComponents(lockMenu),
-    new ActionRowBuilder().addComponents(unlockMenu)
-  ], allowedMentions: { parse: [] } };
+      '### Fonctionnement',
+      '1. Sélectionne un rôle dans le premier menu pour le verrouiller.',
+      '2. Toute nouvelle attribution sera retirée automatiquement.',
+      '3. Utilise le second menu pour choisir uniquement parmi les rôles déjà verrouillés.',
+      '',
+      `### Rôles verrouillés — ${locked.length}`,
+      lockedDetails,
+      '',
+      `### Limites configurées — ${limits.length}`,
+      limitDetails,
+      '',
+      '-# Les membres qui possédaient déjà un rôle le conservent. Les changements sont appliqués immédiatement.'
+    ].join('\n').slice(0, 4096))
+    .setThumbnail(guild.iconURL({ extension: 'png', size: 256 }))
+    .setFooter({ text: `${locked.length} rôle(s) verrouillé(s) • ${limits.length} limite(s) active(s)` })
+    .setTimestamp();
+
+  const lockMenu = new RoleSelectMenuBuilder()
+    .setCustomId('rolelock:lock')
+    .setPlaceholder('Choisir un rôle à verrouiller')
+    .setMinValues(1)
+    .setMaxValues(1);
+
+  const unlockMenu = new StringSelectMenuBuilder()
+    .setCustomId('rolelock:unlock')
+    .setPlaceholder(locked.length ? 'Choisir un rôle verrouillé à libérer' : 'Aucun rôle verrouillé')
+    .setMinValues(1)
+    .setMaxValues(1);
+
+  if (locked.length) {
+    unlockMenu.addOptions(locked.slice(0, 25).map(role => ({
+      label: role.name.slice(0, 100),
+      value: role.id,
+      description: `${role.members.size} détenteur(s) actuel(s)`.slice(0, 100),
+      emoji: '🔓'
+    })));
+  } else {
+    unlockMenu.addOptions({ label: 'Aucun rôle verrouillé', value: 'none', description: 'Verrouille d’abord un rôle.' }).setDisabled(true);
+  }
+
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(lockMenu),
+      new ActionRowBuilder().addComponents(unlockMenu)
+    ],
+    allowedMentions: { parse: [] }
+  };
 }
 
 async function refreshPanel(guild) {
@@ -154,11 +222,15 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply('Une erreur est survenue. Vérifie les permissions et la hiérarchie du bot.');
     }
   }
-  if (!interaction.isRoleSelectMenu() || !interaction.customId.startsWith('rolelock:')) return;
+  const isRoleLockMenu = interaction.isRoleSelectMenu() && interaction.customId === 'rolelock:lock';
+  const isRoleUnlockMenu = interaction.isStringSelectMenu() && interaction.customId === 'rolelock:unlock';
+  if (!isRoleLockMenu && !isRoleUnlockMenu) return;
   if (!allowed(interaction.member)) return interaction.reply({ content: 'Tu n’as pas accès à ce panneau.', ephemeral: true });
   await interaction.deferReply({ ephemeral: true });
-  const role = interaction.guild.roles.cache.get(interaction.values[0]);
-  const text = interaction.customId.endsWith(':lock')
+  const roleId = interaction.values[0];
+  if (roleId === 'none') return interaction.editReply('Aucun rôle n’est actuellement verrouillé.');
+  const role = interaction.guild.roles.cache.get(roleId);
+  const text = isRoleLockMenu
     ? await lockRole(interaction.guild, role, interaction.user)
     : await unlockRole(interaction.guild, role, interaction.user);
   return interaction.editReply(text);

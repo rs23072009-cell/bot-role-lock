@@ -14,7 +14,7 @@ Bot Discord qui empêche l’attribution de rôles verrouillés. Toute nouvelle 
 /rolelock logs [salon]
 ```
 
-`setup` crée, ou utilise, un salon de gestion avec deux menus : **Verrouiller un rôle** et **Déverrouiller un rôle**.
+`setup` crée, ou utilise, un salon de gestion avec un panneau détaillé : détenteurs actuels, limites configurées et fonctionnement du verrouillage. Le menu **Déverrouiller un rôle** affiche uniquement les rôles actuellement verrouillés.
 
 Le verrouillage conserve les détenteurs actuels et bloque toute nouvelle attribution, qu’elle soit faite par un membre, un modérateur, un autre bot ou un système automatique. Une limite autorise le rôle jusqu’au nombre choisi, puis retire les attributions supplémentaires.
 
