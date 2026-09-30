@@ -1,7 +1,7 @@
 require('dotenv').config();
 const {
   ActionRowBuilder, AuditLogEvent, ChannelType, Client, EmbedBuilder, Events,
-  GatewayIntentBits, PermissionFlagsBits, REST, RoleSelectMenuBuilder, Routes,
+  GatewayIntentBits, REST, RoleSelectMenuBuilder, Routes,
   SlashCommandBuilder, StringSelectMenuBuilder
 } = require('discord.js');
 const Store = require('./src/store');
@@ -36,9 +36,7 @@ const commands = [
 ].map(command => command.toJSON());
 
 function allowed(member) {
-  return owners.has(member.id) || member.id === member.guild.ownerId
-    || member.permissions.has(PermissionFlagsBits.Administrator)
-    || member.permissions.has(PermissionFlagsBits.ManageRoles);
+  return Boolean(member && owners.has(member.id));
 }
 
 function roleProblem(guild, role) {
