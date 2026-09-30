@@ -5,5 +5,12 @@ if (missing.length) {
   console.error(`Fichiers manquants : ${missing.join(', ')}`);
   process.exit(1);
 }
-console.log('Structure du bot Role Lock valide.');
+const source = fs.readFileSync('index.js', 'utf8');
+if (!source.includes('return Boolean(member && owners.has(member.id));')) {
+  throw new Error('La gestion de Role Lock doit être réservée aux OWNER_IDS.');
+}
+for (const forbidden of ['member.guild.ownerId', 'PermissionFlagsBits.Administrator', 'PermissionFlagsBits.ManageRoles']) {
+  if (source.includes(forbidden)) throw new Error(`Accès automatique interdit encore présent : ${forbidden}`);
+}
+console.log('Structure et accès Owner du bot Role Lock valides.');
 
