@@ -10,7 +10,7 @@ const token = process.env.DISCORD_TOKEN?.trim();
 if (!token) throw new Error('DISCORD_TOKEN manquant.');
 const owners = new Set((process.env.OWNER_IDS || '949707800257384498').split(',').map(id => id.trim()).filter(Boolean));
 const store = new Store(process.env.DATA_FILE || './data/role-lock.json');
-const COLOR = 0xe11d48;
+const COLOR = 0x000000;
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMembers
